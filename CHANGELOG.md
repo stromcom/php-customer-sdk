@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-17
+
 ### Added
 - Initial release of the STROMCOM Customer SDK for PHP.
 - `Client` covering Project, Users, Threads, Messages and Attachment endpoints.
@@ -27,3 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PHPUnit 11 test suite (78 tests, 210 assertions), PHPStan level 9,
   php-cs-fixer config.
 - GitHub Actions CI for PHP 8.3 and 8.4.
+- `MessageResource::reactions()` — list emoji reactions on a message,
+  aggregated by code (`MessageReaction`, `MessageReactionUser` models).
+- `ThreadResource::create()` — upsert a thread by code, optionally with an
+  initial message and attachments.
+- `ThreadResource::update()` — update thread `name` / `url` / `attributes`.
+- `MessageResource::create()` — send a message (with attachments) in an
+  existing thread.

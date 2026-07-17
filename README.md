@@ -54,6 +54,26 @@ $stromcom->users()->update($hash, ['name' => 'Jane Smith']);
 $stromcom->users()->delete($hash);   // soft delete, idempotent
 $stromcom->users()->restore($hash);
 
+// Create a thread (upsert by code) with an optional initial message.
+// The author must be identified via user_hash/user_code when a message/
+// attachments are present — the request isn't bound to a logged-in user.
+$created = $stromcom->threads()->create([
+    'code'      => 'order-1234',
+    'name'      => 'Order #1234',
+    'message'   => '<p>Your order has shipped.</p>',
+    'user_code' => 'employee-42',
+]);
+$thread = $created['thread'];    // Thread
+$message = $created['message'];  // ?Message
+
+$stromcom->threads()->update('order-1234', ['name' => 'Order #1234 (shipped)']);
+
+// Send a follow-up message in the same thread
+$stromcom->messages()->create('order-1234', [
+    'message'   => '<p>Tracking number: 1Z999AA10123456784</p>',
+    'user_code' => 'employee-42',
+]);
+
 // Thread + messages + attachments in one round-trip
 $result   = $stromcom->threads()->getWithMessages('order-1234');
 $thread   = $result['thread'];     // Thread
@@ -87,8 +107,10 @@ covering each area:
 | [`project_settings.php`](examples/project_settings.php) | Read & PATCH project policy flags. |
 | [`users_lifecycle.php`](examples/users_lifecycle.php) | Create → fetch → update → delete → restore. |
 | [`thread_with_messages.php`](examples/thread_with_messages.php) | Thread + messages + attachments in one call. |
+| [`create_thread_and_message.php`](examples/create_thread_and_message.php) | Create/upsert a thread with an initial message, update it, send a follow-up message. |
 | [`paginate_messages.php`](examples/paginate_messages.php) | Cursor pagination via `lastMessageHash`. |
 | [`download_attachment.php`](examples/download_attachment.php) | Resolve and save attachments to disk. |
+| [`message_reactions.php`](examples/message_reactions.php) | List emoji reactions on a message, aggregated by code. |
 | [`error_handling.php`](examples/error_handling.php) | Catch the typed exception hierarchy. |
 | [`custom_http_client.php`](examples/custom_http_client.php) | Plug a custom `HttpClientInterface`. |
 
@@ -114,6 +136,7 @@ keys land as `null`.
 | `Message`, `MessageList` | `messages()->list()`, `threads()->getWithMessages()` |
 | `MessageAttachment` | `messages()->attachments()`, `MessageList::attachmentsFor()` |
 | `AttachmentDownload` | `messages()->attachmentDownload()` |
+| `MessageReaction`, `MessageReactionUser` | `messages()->reactions()` |
 
 ## Method reference
 
@@ -131,14 +154,18 @@ void              $stromcom->users()->delete(string $hash);
 User              $stromcom->users()->restore(string $hash);
 
 // Threads
+array{thread: Thread, message: ?Message, attachmentsUploadURL: list<string>}  $stromcom->threads()->create(array $payload);
+Thread                                                $stromcom->threads()->update(string $code, array $changes);
 Thread                                                $stromcom->threads()->get(string $code, array $expand = []);
 array{thread: Thread, messages: MessageList}         $stromcom->threads()->getWithMessages(string $code);
 
 // Messages
+array{message: Message, attachmentsUploadURL: list<string>}  $stromcom->messages()->create(string $threadCode, array $payload);
 MessageList              $stromcom->messages()->list(string $threadCode, ?string $lastMessageHash = null);
 void                     $stromcom->messages()->delete(string $threadCode, string $messageHash);
 list<MessageAttachment>  $stromcom->messages()->attachments(string $threadCode, string $messageHash);
 AttachmentDownload       $stromcom->messages()->attachmentDownload(string $threadCode, string $messageHash, string $attachmentHash);
+list<MessageReaction>    $stromcom->messages()->reactions(string $threadCode, string $messageHash);
 ```
 
 ## Configuration
