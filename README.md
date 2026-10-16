@@ -14,14 +14,19 @@ composer require stromcom/customer-sdk
 
 ## API access & documentation
 
-- **Reference docs:** <https://www.stromcom.cz/docs/customer/>
-- **OpenAPI spec:** <https://www.stromcom.cz/docs/customer/swagger.json>
+- **Reference docs (Swagger UI):** <https://www.stromcom.cz/docs/customer/>
+- **OpenAPI spec:** <https://www.stromcom.cz/docs/customer/openapi.json>
 
 API access is gated by your STROMCOM subscription — only plans that
 explicitly include API access can issue Customer API tokens and call
 the endpoints below. If your token returns `401 Unauthorized` or your
 project's `allowAPI` flag is `false`, check your current plan in the
 STROMCOM console or contact support to upgrade.
+
+The token must be an API key of type **`customer`** (or `both`), created
+in the customer panel under *Project → Credentials*
+(`/customer/project/{id}/credentials/`). It grants full access to the
+project — use it **server-side only**, never in browser or mobile code.
 
 ## Quick start
 
@@ -53,6 +58,26 @@ $hash = $created->user->hash;
 $stromcom->users()->update($hash, ['name' => 'Jane Smith']);
 $stromcom->users()->delete($hash);   // soft delete, idempotent
 $stromcom->users()->restore($hash);
+
+// Create a thread (upsert by code) with an optional initial message.
+// The author must be identified via user_hash/user_code when a message/
+// attachments are present — the request isn't bound to a logged-in user.
+$created = $stromcom->threads()->create([
+    'code'      => 'order-1234',
+    'name'      => 'Order #1234',
+    'message'   => '<p>Your order has shipped.</p>',
+    'user_code' => 'employee-42',
+]);
+$thread = $created['thread'];    // Thread
+$message = $created['message'];  // ?Message
+
+$stromcom->threads()->update('order-1234', ['name' => 'Order #1234 (shipped)']);
+
+// Send a follow-up message in the same thread
+$stromcom->messages()->create('order-1234', [
+    'message'   => '<p>Tracking number: 1Z999AA10123456784</p>',
+    'user_code' => 'employee-42',
+]);
 
 // Thread + messages + attachments in one round-trip
 $result   = $stromcom->threads()->getWithMessages('order-1234');
@@ -87,8 +112,10 @@ covering each area:
 | [`project_settings.php`](examples/project_settings.php) | Read & PATCH project policy flags. |
 | [`users_lifecycle.php`](examples/users_lifecycle.php) | Create → fetch → update → delete → restore. |
 | [`thread_with_messages.php`](examples/thread_with_messages.php) | Thread + messages + attachments in one call. |
-| [`paginate_messages.php`](examples/paginate_messages.php) | Cursor pagination via `lastMessageHash`. |
+| [`create_thread_and_message.php`](examples/create_thread_and_message.php) | Create/upsert a thread with an initial message, update it, send a follow-up message. |
+| [`paginate_messages.php`](examples/paginate_messages.php) | Incremental sync via the `lastMessageHash` cursor. |
 | [`download_attachment.php`](examples/download_attachment.php) | Resolve and save attachments to disk. |
+| [`message_reactions.php`](examples/message_reactions.php) | List emoji reactions on a message, aggregated by code. |
 | [`error_handling.php`](examples/error_handling.php) | Catch the typed exception hierarchy. |
 | [`custom_http_client.php`](examples/custom_http_client.php) | Plug a custom `HttpClientInterface`. |
 
@@ -114,6 +141,7 @@ keys land as `null`.
 | `Message`, `MessageList` | `messages()->list()`, `threads()->getWithMessages()` |
 | `MessageAttachment` | `messages()->attachments()`, `MessageList::attachmentsFor()` |
 | `AttachmentDownload` | `messages()->attachmentDownload()` |
+| `MessageReaction`, `MessageReactionUser` | `messages()->reactions()` |
 
 ## Method reference
 
@@ -131,15 +159,33 @@ void              $stromcom->users()->delete(string $hash);
 User              $stromcom->users()->restore(string $hash);
 
 // Threads
+array{thread: Thread, message: ?Message, attachmentsUploadURL: list<string>}  $stromcom->threads()->create(array $payload);
+Thread                                                $stromcom->threads()->update(string $code, array $changes);
 Thread                                                $stromcom->threads()->get(string $code, array $expand = []);
 array{thread: Thread, messages: MessageList}         $stromcom->threads()->getWithMessages(string $code);
 
 // Messages
+array{message: Message, attachmentsUploadURL: list<string>}  $stromcom->messages()->create(string $threadCode, array $payload);
 MessageList              $stromcom->messages()->list(string $threadCode, ?string $lastMessageHash = null);
 void                     $stromcom->messages()->delete(string $threadCode, string $messageHash);
 list<MessageAttachment>  $stromcom->messages()->attachments(string $threadCode, string $messageHash);
 AttachmentDownload       $stromcom->messages()->attachmentDownload(string $threadCode, string $messageHash, string $attachmentHash);
+list<MessageReaction>    $stromcom->messages()->reactions(string $threadCode, string $messageHash);
 ```
+
+### Message cursor (`lastMessageHash`)
+
+`messages()->list($threadCode, $lastMessageHash)` is not page-based:
+
+- messages are returned **oldest-first**;
+- the cursor is **inclusive** — the first returned message is the cursor
+  message itself;
+- there is **no page size** — the server returns every message from the
+  cursor onward (limited only by your plan's history window).
+
+Use it for incremental sync: store the hash of the newest message you
+have, fetch from it next time and drop the first item when it equals the
+cursor. See [`examples/paginate_messages.php`](examples/paginate_messages.php).
 
 ## Configuration
 
@@ -170,11 +216,11 @@ All SDK exceptions extend `Stromcom\Sdk\Exception\StromcomException`.
 | `AuthenticationException` | 401 — invalid / missing token |
 | `NotFoundException`       | 404 — resource not found |
 | `ValidationException`     | 400 / 422 — invalid input |
-| `ConflictException`       | 409 — e.g. user code already exists, limit reached |
+| `ConflictException`       | 409 — e.g. user code already exists |
 | `RateLimitException`      | 429 — slow down |
 | `ServerException`         | 5xx |
 | `TransportException`      | network failure / non-JSON response |
-| `ApiException`            | catch-all base for any other API error |
+| `ApiException`            | base class; thrown as-is for any other status, notably 402 and 403 (see below) |
 
 Every API exception exposes:
 
@@ -189,8 +235,41 @@ try {
 }
 ```
 
+Plan limits (**402**) and forbidden actions (**403**) have no dedicated
+subclass — they surface as a plain `ApiException`. Catch the specific
+exceptions first, then `ApiException`, and branch on `getApiCode()`:
+
+| Status | `getApiCode()` |
+|---|---|
+| 402 | `USER_LIMIT_REACHED`, `THREAD_LIMIT_REACHED`, `MESSAGE_LIMIT_REACHED`, `STORAGE_LIMIT_REACHED`, `MESSAGE_STORAGE_LIMIT_REACHED`, `WEBHOOK_LIMIT_REACHED` |
+| 403 | `ACTION_FORBIDDEN` |
+
+```php
+use Stromcom\Sdk\Exception\ApiException;
+use Stromcom\Sdk\Exception\ValidationException;
+
+try {
+    $stromcom->messages()->create('order-1234', $payload);
+} catch (ValidationException $e) {
+    // fix the payload
+} catch (ApiException $e) {
+    match ($e->getApiCode()) {
+        'MESSAGE_LIMIT_REACHED', 'STORAGE_LIMIT_REACHED' => notifyAdminToUpgrade($e),
+        'ACTION_FORBIDDEN'                               => logForbidden($e),
+        default                                          => throw $e,
+    };
+}
+```
+
 A worked example of catching every variant lives in
 [`examples/error_handling.php`](examples/error_handling.php).
+
+## Known limitations
+
+- The SDK returns only the `data` part of the API response envelope. The
+  `meta` part (e.g. `meta.warnings`, `meta.updated`) is dropped and is not
+  reachable through the SDK. If you need it, call the API directly or wrap
+  your own `HttpClientInterface` to inspect the raw response.
 
 ## Requirements
 

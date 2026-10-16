@@ -18,6 +18,10 @@ final class CurlHttpClient implements HttpClientInterface {
     array $headers = [],
     ?string $body = null,
   ): RawResponse {
+    if ($method === '' || $url === '') {
+      throw new TransportException('HTTP method and URL must not be empty.');
+    }
+
     $ch = curl_init();
     if ($ch === false) {
       throw new TransportException('Could not initialize cURL.');

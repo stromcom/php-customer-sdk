@@ -25,6 +25,47 @@ final class MessageResourceTest extends TestCase {
   }
 
   #[Test]
+  public function create_sends_payload_and_hydrates_message(): void {
+    $this->http->enqueueJson(201, [
+      'status' => 'success',
+      'data' => [
+        'message' => ['hash' => 'm1', 'message' => '<p>Hi</p>', 'userName' => 'Jane'],
+        'attachmentsUploadURL' => ['https://upload.example/invoice.pdf'],
+      ],
+    ]);
+
+    $result = $this->client->messages()->create('order-1', [
+      'message' => '<p>Hi</p>',
+      'user_code' => 'u1',
+      'attachments' => ['invoice.pdf'],
+    ]);
+
+    $this->assertSame('m1', $result['message']->hash);
+    $this->assertSame('Jane', $result['message']->userName);
+    $this->assertSame(['https://upload.example/invoice.pdf'], $result['attachmentsUploadURL']);
+
+    $call = $this->http->lastCall();
+    $this->assertSame('POST', $call['method']);
+    $this->assertSame(self::BASE_URL . 'threads/order-1/messages/', $call['url']);
+    $this->assertSame(
+      ['message' => '<p>Hi</p>', 'user_code' => 'u1', 'attachments' => ['invoice.pdf']],
+      json_decode((string) $call['body'], true),
+    );
+  }
+
+  #[Test]
+  public function create_defaults_upload_urls_to_empty_list(): void {
+    $this->http->enqueueJson(201, [
+      'status' => 'success',
+      'data' => ['message' => ['hash' => 'm1', 'message' => '<p>Hi</p>']],
+    ]);
+
+    $result = $this->client->messages()->create('order-1', ['message' => '<p>Hi</p>']);
+
+    $this->assertSame([], $result['attachmentsUploadURL']);
+  }
+
+  #[Test]
   public function list_returns_messages_and_attachments(): void {
     $this->http->enqueueJson(200, [
       'status' => 'success',
@@ -110,6 +151,50 @@ final class MessageResourceTest extends TestCase {
       self::BASE_URL . 'threads/order-1/messages/m1/attachments/a1/download/',
       $this->http->lastCall()['url'],
     );
+  }
+
+  #[Test]
+  public function reactions_returns_aggregated_reactions(): void {
+    $this->http->enqueueJson(200, [
+      'status' => 'success',
+      'data' => [
+        'reactions' => [
+          [
+            'code' => '👍',
+            'count' => 2,
+            'currentUserReacted' => true,
+            'users' => [
+              ['hash' => 'u1', 'name' => 'Jane'],
+              ['hash' => 'u2', 'name' => 'John'],
+            ],
+          ],
+        ],
+      ],
+    ]);
+
+    $reactions = $this->client->messages()->reactions('order-1', 'm1');
+
+    $this->assertCount(1, $reactions);
+    $this->assertSame('👍', $reactions[0]->code);
+    $this->assertSame(2, $reactions[0]->count);
+    $this->assertTrue($reactions[0]->currentUserReacted);
+    $this->assertCount(2, $reactions[0]->users);
+    $this->assertSame('u1', $reactions[0]->users[0]->hash);
+    $this->assertSame('Jane', $reactions[0]->users[0]->name);
+    $this->assertSame(
+      self::BASE_URL . 'threads/order-1/messages/m1/reactions/',
+      $this->http->lastCall()['url'],
+    );
+  }
+
+  #[Test]
+  public function reactions_returns_empty_list_when_message_has_none(): void {
+    $this->http->enqueueJson(200, [
+      'status' => 'success',
+      'data' => ['reactions' => []],
+    ]);
+
+    $this->assertSame([], $this->client->messages()->reactions('order-1', 'm1'));
   }
 
 }

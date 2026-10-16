@@ -18,8 +18,10 @@ php examples/quickstart.php
 | [`project_settings.php`](project_settings.php) | Read project settings, then PATCH a couple of policy flags. |
 | [`users_lifecycle.php`](users_lifecycle.php) | Full user lifecycle: create → fetch → update → delete → restore. |
 | [`thread_with_messages.php`](thread_with_messages.php) | Single-call fetch of a thread, its messages, and grouped attachments. |
-| [`paginate_messages.php`](paginate_messages.php) | Walk every message in a thread via the `lastMessageHash` cursor. |
+| [`create_thread_and_message.php`](create_thread_and_message.php) | Create/upsert a thread with an initial message, update it, send a follow-up message. |
+| [`paginate_messages.php`](paginate_messages.php) | Incremental sync of new messages via the inclusive `lastMessageHash` cursor. |
 | [`download_attachment.php`](download_attachment.php) | Resolve attachment metadata, fetch a signed URL, save to disk. |
+| [`message_reactions.php`](message_reactions.php) | List emoji reactions on a message, aggregated by code. |
 | [`error_handling.php`](error_handling.php) | Catch the typed exception hierarchy (`NotFound`, `Validation`, …). |
 | [`custom_http_client.php`](custom_http_client.php) | Plug a custom `HttpClientInterface` (logging wrapper here). |
 

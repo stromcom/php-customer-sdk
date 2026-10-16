@@ -3,13 +3,57 @@ declare(strict_types=1);
 
 namespace Stromcom\Sdk\Resource;
 
+use Stromcom\Sdk\Model\Message;
 use Stromcom\Sdk\Model\MessageList;
 use Stromcom\Sdk\Model\Thread;
 
 /**
- * `/threads/` — read threads bound to your business entities by `code`.
+ * `/threads/` — create, read and update threads bound to your business
+ * entities by `code`.
  */
 final class ThreadResource extends AbstractResource {
+
+  /**
+   * POST /threads/ — create a thread (upsert by `code` — an existing thread
+   * with the same code is updated). Optionally include an initial `message`;
+   * when `message` or `attachments` are present in $payload, the author must
+   * be identified via `user_hash` or `user_code`.
+   *
+   * @param array<string, mixed> $payload
+   *
+   * @return array{thread: Thread, message: ?Message, attachmentsUploadURL: list<string>}
+   */
+  public function create(array $payload): array {
+    /** @var array<string, mixed> $data */
+    $data = $this->client->request('POST', 'threads/', body: $payload) ?? [];
+
+    /** @var array<string, mixed> $threadData */
+    $threadData = isset($data['thread']) && is_array($data['thread']) ? $data['thread'] : [];
+    /** @var array<string, mixed>|null $messageData */
+    $messageData = isset($data['message']) && is_array($data['message']) ? $data['message'] : null;
+    /** @var list<string> $uploadURLs */
+    $uploadURLs = isset($data['attachmentsUploadURL']) && is_array($data['attachmentsUploadURL'])
+      ? array_values($data['attachmentsUploadURL'])
+      : [];
+
+    return [
+      'thread' => Thread::fromArray($threadData),
+      'message' => $messageData !== null ? Message::fromArray($messageData) : null,
+      'attachmentsUploadURL' => $uploadURLs,
+    ];
+  }
+
+  /**
+   * PUT /threads/{code}/ — update thread metadata (`name`, `url`,
+   * `attributes`). Only the keys present in $changes are written.
+   *
+   * @param array<string, mixed> $changes
+   */
+  public function update(string $code, array $changes): Thread {
+    /** @var array<string, mixed> $data */
+    $data = $this->client->request('PUT', "threads/{$code}/", body: $changes) ?? [];
+    return Thread::fromArray($this->extractThread($data));
+  }
 
   /**
    * GET /threads/{code}/

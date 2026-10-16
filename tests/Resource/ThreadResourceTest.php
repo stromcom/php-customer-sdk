@@ -25,6 +25,68 @@ final class ThreadResourceTest extends TestCase {
   }
 
   #[Test]
+  public function create_upserts_thread_without_message(): void {
+    $this->http->enqueueJson(201, [
+      'status' => 'success',
+      'data' => [
+        'thread' => ['code' => 'order-1', 'hash' => 'eVO6SY5kf5', 'name' => 'Order 1'],
+        'message' => null,
+        'attachmentsUploadURL' => [],
+      ],
+    ]);
+
+    $result = $this->client->threads()->create(['code' => 'order-1', 'name' => 'Order 1']);
+
+    $this->assertSame('order-1', $result['thread']->code);
+    $this->assertNull($result['message']);
+    $this->assertSame([], $result['attachmentsUploadURL']);
+
+    $call = $this->http->lastCall();
+    $this->assertSame('POST', $call['method']);
+    $this->assertSame(self::BASE_URL . 'threads/', $call['url']);
+    $this->assertSame(['code' => 'order-1', 'name' => 'Order 1'], json_decode((string) $call['body'], true));
+  }
+
+  #[Test]
+  public function create_with_initial_message_hydrates_message_and_upload_urls(): void {
+    $this->http->enqueueJson(201, [
+      'status' => 'success',
+      'data' => [
+        'thread' => ['code' => 'order-1', 'hash' => 'eVO6SY5kf5', 'name' => 'Order 1'],
+        'message' => ['hash' => 'm1', 'message' => '<p>Hi</p>', 'userName' => 'Jane'],
+        'attachmentsUploadURL' => ['https://upload.example/invoice.pdf'],
+      ],
+    ]);
+
+    $result = $this->client->threads()->create([
+      'code' => 'order-1',
+      'message' => '<p>Hi</p>',
+      'user_code' => 'u1',
+      'attachments' => ['invoice.pdf'],
+    ]);
+
+    $this->assertSame('m1', $result['message']?->hash);
+    $this->assertSame(['https://upload.example/invoice.pdf'], $result['attachmentsUploadURL']);
+  }
+
+  #[Test]
+  public function update_sends_changes_and_returns_thread(): void {
+    $this->http->enqueueJson(200, [
+      'status' => 'success',
+      'data' => ['code' => 'order-1', 'hash' => 'eVO6SY5kf5', 'name' => 'Renamed'],
+    ]);
+
+    $thread = $this->client->threads()->update('order-1', ['name' => 'Renamed']);
+
+    $this->assertSame('Renamed', $thread->name);
+
+    $call = $this->http->lastCall();
+    $this->assertSame('PUT', $call['method']);
+    $this->assertSame(self::BASE_URL . 'threads/order-1/', $call['url']);
+    $this->assertSame(['name' => 'Renamed'], json_decode((string) $call['body'], true));
+  }
+
+  #[Test]
   public function get_without_expand_omits_query_string(): void {
     $this->http->enqueueJson(200, [
       'status' => 'success',
