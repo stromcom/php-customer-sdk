@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- README: OpenAPI spec link now points to `/docs/customer/openapi.json` (was `swagger.json`).
+- `examples/paginate_messages.php` rewritten as incremental sync — the `lastMessageHash` cursor is inclusive and the API has no page size.
+
+### Documentation
+
+- README: how the `lastMessageHash` cursor behaves (oldest-first, inclusive, no page size).
+- README: 402 plan-limit and 403 `ACTION_FORBIDDEN` errors surface as `ApiException`; branch on `getApiCode()`.
+- README: required token type (`customer` / `both`, server-side only) and where to create it.
+- README: known limitation — response `meta` (warnings, `meta.updated`) is not exposed.
+
 ## [0.1.0] - 2026-07-17
 
 ### Added
