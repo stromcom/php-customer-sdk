@@ -14,14 +14,19 @@ composer require stromcom/customer-sdk
 
 ## API access & documentation
 
-- **Reference docs:** <https://www.stromcom.cz/docs/customer/>
-- **OpenAPI spec:** <https://www.stromcom.cz/docs/customer/swagger.json>
+- **Reference docs (Swagger UI):** <https://www.stromcom.cz/docs/customer/>
+- **OpenAPI spec:** <https://www.stromcom.cz/docs/customer/openapi.json>
 
 API access is gated by your STROMCOM subscription — only plans that
 explicitly include API access can issue Customer API tokens and call
 the endpoints below. If your token returns `401 Unauthorized` or your
 project's `allowAPI` flag is `false`, check your current plan in the
 STROMCOM console or contact support to upgrade.
+
+The token must be an API key of type **`customer`** (or `both`), created
+in the customer panel under *Project → Credentials*
+(`/customer/project/{id}/credentials/`). It grants full access to the
+project — use it **server-side only**, never in browser or mobile code.
 
 ## Quick start
 
@@ -108,7 +113,7 @@ covering each area:
 | [`users_lifecycle.php`](examples/users_lifecycle.php) | Create → fetch → update → delete → restore. |
 | [`thread_with_messages.php`](examples/thread_with_messages.php) | Thread + messages + attachments in one call. |
 | [`create_thread_and_message.php`](examples/create_thread_and_message.php) | Create/upsert a thread with an initial message, update it, send a follow-up message. |
-| [`paginate_messages.php`](examples/paginate_messages.php) | Cursor pagination via `lastMessageHash`. |
+| [`paginate_messages.php`](examples/paginate_messages.php) | Incremental sync via the `lastMessageHash` cursor. |
 | [`download_attachment.php`](examples/download_attachment.php) | Resolve and save attachments to disk. |
 | [`message_reactions.php`](examples/message_reactions.php) | List emoji reactions on a message, aggregated by code. |
 | [`error_handling.php`](examples/error_handling.php) | Catch the typed exception hierarchy. |
@@ -168,6 +173,20 @@ AttachmentDownload       $stromcom->messages()->attachmentDownload(string $threa
 list<MessageReaction>    $stromcom->messages()->reactions(string $threadCode, string $messageHash);
 ```
 
+### Message cursor (`lastMessageHash`)
+
+`messages()->list($threadCode, $lastMessageHash)` is not page-based:
+
+- messages are returned **oldest-first**;
+- the cursor is **inclusive** — the first returned message is the cursor
+  message itself;
+- there is **no page size** — the server returns every message from the
+  cursor onward (limited only by your plan's history window).
+
+Use it for incremental sync: store the hash of the newest message you
+have, fetch from it next time and drop the first item when it equals the
+cursor. See [`examples/paginate_messages.php`](examples/paginate_messages.php).
+
 ## Configuration
 
 ```php
@@ -197,11 +216,11 @@ All SDK exceptions extend `Stromcom\Sdk\Exception\StromcomException`.
 | `AuthenticationException` | 401 — invalid / missing token |
 | `NotFoundException`       | 404 — resource not found |
 | `ValidationException`     | 400 / 422 — invalid input |
-| `ConflictException`       | 409 — e.g. user code already exists, limit reached |
+| `ConflictException`       | 409 — e.g. user code already exists |
 | `RateLimitException`      | 429 — slow down |
 | `ServerException`         | 5xx |
 | `TransportException`      | network failure / non-JSON response |
-| `ApiException`            | catch-all base for any other API error |
+| `ApiException`            | base class; thrown as-is for any other status, notably 402 and 403 (see below) |
 
 Every API exception exposes:
 
@@ -216,8 +235,41 @@ try {
 }
 ```
 
+Plan limits (**402**) and forbidden actions (**403**) have no dedicated
+subclass — they surface as a plain `ApiException`. Catch the specific
+exceptions first, then `ApiException`, and branch on `getApiCode()`:
+
+| Status | `getApiCode()` |
+|---|---|
+| 402 | `USER_LIMIT_REACHED`, `THREAD_LIMIT_REACHED`, `MESSAGE_LIMIT_REACHED`, `STORAGE_LIMIT_REACHED`, `MESSAGE_STORAGE_LIMIT_REACHED`, `WEBHOOK_LIMIT_REACHED` |
+| 403 | `ACTION_FORBIDDEN` |
+
+```php
+use Stromcom\Sdk\Exception\ApiException;
+use Stromcom\Sdk\Exception\ValidationException;
+
+try {
+    $stromcom->messages()->create('order-1234', $payload);
+} catch (ValidationException $e) {
+    // fix the payload
+} catch (ApiException $e) {
+    match ($e->getApiCode()) {
+        'MESSAGE_LIMIT_REACHED', 'STORAGE_LIMIT_REACHED' => notifyAdminToUpgrade($e),
+        'ACTION_FORBIDDEN'                               => logForbidden($e),
+        default                                          => throw $e,
+    };
+}
+```
+
 A worked example of catching every variant lives in
 [`examples/error_handling.php`](examples/error_handling.php).
+
+## Known limitations
+
+- The SDK returns only the `data` part of the API response envelope. The
+  `meta` part (e.g. `meta.warnings`, `meta.updated`) is dropped and is not
+  reachable through the SDK. If you need it, call the API directly or wrap
+  your own `HttpClientInterface` to inspect the raw response.
 
 ## Requirements
 
