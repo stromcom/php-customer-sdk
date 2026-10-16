@@ -25,7 +25,7 @@
         ],
         "ca": [
             "@phpstan",
-            "@cs-check"
+            "@cs"
         ]
     },
     "autoload": {
